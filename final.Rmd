@@ -1,0 +1,269 @@
+---
+title: "Final Project"
+author: "Wahyu Tiara Rosaamalia"
+date: "2023-01-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+1. Business Understanding\
+Risiko kredit merupakan kerugian yang berkaitan dengan peluang gagal memenuhi kewajibann pada saat jatuh tempo pembayaran. Perhitungan ini dilakukan untuk membangun model yang dapat memprediksi credit risk dengan menggunakan dataset yang berisi data pinjaman 
+\
+2. Analytic Approach\
+Karena data yang diberikan tidak memiliki label/target, maka untuk pengerjaannya harus dilakukan dengan algoritma unsupervised learning.\
+
+3. Data Requirement\
+Data yang diperlukan adalah data dari nasabah atau peminjam. 
+
+4. Data Collection
+```{r}
+loan=read.csv('C:\\Users\\Acer\\OneDrive - Universitas Diponegoro\\Rakamin\\loan_data_2007_2014.csv')
+```
+5. Data Understanding dan Data Preparation\
+Pertama-tama kita akan mendapatkan insight dari data understanding dengan mengetahui bentuk data, missing value, dan jumlah data yang akan ditangani. Data didapatkan dari Loan Dataset.
+```{r}
+dim(loan)
+str(loan)
+```
+untuk lebih mengetahui mengenai data yang akan ditangani, maka disediakan dictionary
+```{r}
+dicti=readxl::read_excel('C:\\Users\\Acer\\OneDrive - Universitas Diponegoro\\Rakamin\\dictio.xlsx')
+library(DT)
+datatable(dicti)
+```
+Pertama yang dilakukan adalah mengecek adanya missing value
+```{r}
+summary(loan)
+```
+Karena terdapat variabel dengan jumlah missing value yang banyak, maka variabel dengan jumlah missing value lebih dari 50% akan dihapus. 
+```{r}
+colSums(is.na(loan))<0.5*nrow(loan)
+clean=subset(loan, select = -c(X, id,  member_id, mths_since_last_delinq, all_util, mths_since_last_major_derog, url, desc, title, zip_code, il_util,annual_inc_joint,dti_joint,verification_status_joint, open_acc_6m,open_il_6m,open_il_12m,open_il_24m,mths_since_rcnt_il, total_bal_il,open_rv_12m,open_rv_24m,max_bal_bc,inq_fi,total_cu_tl,inq_last_12m))
+```
+\
+Kemudian missing value pada variabel yang tersedia akan diisi dengan mean, median, dan modus. Untuk missing value berupa data string seperti grade, akan diisi dengan modus grade. Untuk data inquires last 6 month, akan diisi dengan median dengan pertimbangan untuk mengambil nilai tengah dari jumlah inquires yang terjadi pada seluruh loan credit member selama 6 bulan. Beberapa missing value juga dihapus dengan pertimbangan bahwa menghapus sejumlah missing value tidak akan mengganggu prediksi yang akan dilakukan.
+```{r}
+clean$grade=as.character(clean$grade) #fill na in grade
+clean$grade[is.na(clean$grade)]=mode(clean$grade) 
+clean$annual_inc[is.na(clean$annual_inc)]=mean(clean$annual_inc) #fill annual inc with mean
+clean$delinq_2yrs[is.na(clean$delinq_2yrs)]=mode(clean$delinq_2yrs)
+clean$inq_last_6mths[is.na(clean$inq_last_6mths)]=median(clean$inq_last_6mths)
+clean$mths_since_last_record[is.na(clean$mths_since_last_record)]=0
+clean$open_acc[is.na(clean$open_acc)]=mode(clean$open_acc)
+clean$pub_rec[is.na(clean$pub_rec)]=0
+clean$total_acc[is.na(clean$total_acc)]=round(mean(clean$total_acc),0)
+clean=clean[rowSums(is.na(clean)) == 0, ]
+```
+\
+Selanjutnya melakukan visualisasi pada data. Pertama akan dilakukan visualisasi pada loan amount. Nilai pada loan amount adalah dalam dolar. Maximum loan adalah 35000 dan minimumnya adalah 1000. Distribusinya tidak berdistribusi normal dan memiliki beberapa puncak.\
+```{r}
+library(DescTools)
+Desc(clean$loan_amnt, main = 'Loan Amount', plotit = T)
+```
+Kemudian pada variabel term yang merupakan jumlah pembayaran peminjaman. Pada dataset ini hanya terdapat dua jenis term, yaitu 36 bulan dan 60 bulan. Kebanyakan peminjam menggunakan jenis term 36 bulan. 
+```{r}
+Desc(clean$term, main='Term', plotit = T)
+```
+Kemudian divisualisasikan interest rate pada pinjaman. 
+```{r}
+library(ggplot2)
+Desc(clean$int_rate, main = 'Interest Rate', plotit = T)
+ggplot(clean, aes(int_rate, fill=grade))+geom_density()+facet_grid(grade~.)
+```
+\
+Range dari interest rate cukup lebar dengan bunga tertinggi 6.0% dan tertinggi 25.8. Terdapat 145 unique value yang berarti ada 145 suku bunga yang dikenakan. Dari plot yang dilakukan dengan memasangkan variabel tersebut dengan grade, dapat dilihat bahwa semakin rendah grade maka akan semakin tinggi interest rate. 
+\
+Selanjutnya installment amount.
+```{r}
+library(corrplot)
+Desc(clean$installment, main='Installment', plotit = T)
+cor(data.frame(clean$installment, clean$loan_amnt))%>%
+  corrplot(method = 'number')
+```
+\
+Nilai installment terendah berada di angka 23.26 dan tertinggi sebesar 1409.990. Diketahui dari plot korelasi bahwa installment dan loan amount memiliki hubungan korelasi positif yang kuat.
+\
+```{r}
+Desc(clean$grade, main='Grade', plotit=T)
+Desc(clean$int_rate~clean$grade, digits=2, main='Interest by Grade', plotit=T)
+```
+\
+Pada variabel ini terdapat 7 kategori grade mulai dari A sampai G. Nilai A menunjukkan resiko terendah, sementara G merupakan resiko tertinggi. Bisa diketahui dari plot data dengan nilai interest atau suku bunga, semakin besar kategori resiko, maka suku bunga yang dikenakan akan semakin tinggi.
+```{r}
+library(dplyr)
+clean1=clean%>%group_by(sub_grade)%>%summarise(count=n()) #group subgrade
+ggplot(clean1, aes(x=sub_grade, y=count, fill=sub_grade))+ geom_bar(stat="identity")+geom_text(aes(label=count),vjust = -0.2, size=3)+theme_minimal()
+```
+\
+Dari plot histogram data, diketahui bahwa subgrade resiko pada dataset didominasi oleh subgrade B4. Semakin tinggi nilai subgrade maka akan semakin baik overall scorenya.
+```{r}
+Desc(clean$emp_title, main = 'Employment Title', plotit = T)
+```
+\
+Karena pada visualisasi data terdapat nilai blank yang tidak diketahui, maka diputuskan untuk mengisi jenis pekerjaan tersebut dengan 'unknown' atau tidak diketahui.
+```{r}
+clean$emp_title <- sub("^$", "Unkown", clean$emp_title)
+Desc(clean$emp_title, main = 'Employment Title', plotit = T)
+```
+\
+Pekerjaan peminjam yang diketahui didominasi oleh Guru kemudian disusul oleh manager.
+```{r}
+Desc(clean$emp_length, main = 'Employment Length', plotit = T)
+```
+\
+Sama dengan variabel employment title, terdapat nilai blank pada data, sehingga nilainya diisikan dengan 'unknown'
+```{r}
+clean$emp_length <- sub("^$", "Unkown", clean$emp_length)
+Desc(clean$emp_length, main = 'Employment Length', plotit = T)
+```
+Dari dataset, mayoritas nasabah yang mengajukan pinjaman adalah nasabah dengan lama kerja 10 tahun lebih dengan persentase sebesar 33.6% disusul oleh nasabah dengan lama kerja 2 tahun sebesar 8.6% dan yang terendah adalah nasabah dengan lama kerja 9 tahun.\
+```{r}
+Desc(clean$home_ownership, main = 'Home Ownership', plotit = T)
+```
+\
+Mayoritas kepemilikan rumah nasabah yang mengajukan pinjaman adalah mortgage yang menduduki 51.7% keseluruhan. Sementara 1 orang menjawab any, dan 42 lain tidak memiliki rumah.\
+```{r}
+Desc(clean$annual_inc, main='Annual Income', plotit = T)
+ggplot(clean, aes(x=annual_inc, y=loan_amnt))+geom_point()
+```
+\
+Selanjutnya pendapatan tahunan dari nasabah. Distribusi data menunjukkan nilai skewness positif yang tinggi. Range antara pendapatan tertinggi dan terendah juga besar dengan pendapatan tertinggi sebesar 5000000 dan terendah sebesar 3000.\
+Sementara itu scaterplot yang dibentuk dari variabel pendapatan tahunan dan besar pinjaman yang diajukan menunjukkan bahwa tidak terdapat korelasi antar keduanya, namun terdapat outlier. \
+\
+Variabel verification status menunjukkan apakah pendapatan dari peminjam (nasabah) telah diverifikasi oleh Lending Club. Dari data, diketahui bahwa sebagian besar (36.5%) pendapatan telah terverifikasi, dan 33.4% sumber pendapatan telah terverifikasi.
+\
+```{r}
+Desc(clean$verification_status, main = 'Verification Status', plotit = T)
+```
+Issue date menunjukkan bulan dimana peminjaman didanai. Dari data diketahui bahwa mayoritas pinjaman didanai pada bulan oktober 2014.
+```{r}
+Desc(clean$issue_d, main='Issue Date', plotit=T)
+```
+Pada loan status terdapat 7 level pembayaran. Mayoritas nasabah baru saja membayar pengembalian, dan 33.1% lainnya sudah menyelesaikan pembayaran.T Tidak ada pola yang signifikan antara loan status dan loan amount.\ 
+```{r}
+Desc(clean$loan_status, main='Loan Status', plotit=T)
+ggplot(clean, aes(loan_status, loan_amnt))+geom_boxplot(aes(fill=loan_status))
+```
+Variabel purpose adalah data kategori yang diisikan ketika nasabah mengajukan pinjaman. Ada 13 kategori dalam variabel ini. Lebih dari separuh peminjam (60.4%) diantaranya meminjam untuk keperluan debt consolidation.
+```{r}
+Desc(clean$purpose, main='Purpose', plotit = T)
+```
+Mayoritas peminjam berasal dari California.
+```{r}
+Desc(clean$addr_state, main = 'Address State', plotit = T)
+```
+DTI dihitung dengan menggunakan total pembayaran utang bulanan Peminjam atas total kewajiban utang, tidak termasuk hipotek dan pinjaman Lending Club yang diminta, dibagi dengan pendapatan bulanan yang dilaporkan sendiri oleh peminjam. Ini akan menjadi fitur penting yang memengaruhi kelayakan pinjaman kredit.\
+Kurva distribusi DTI menunjukkan sebaran yang cukup normal.
+```{r}
+Desc(clean$dti, main = 'Debt To Income', plotit=T)
+```
+Earliest credit line menunjukkan bulan dimana batas kredit paling awal yang dilaporkan peminjam dibuka.Mayoritas nasabah membuka pada Agustus tahun 2000.
+```{r}
+Desc(clean$earliest_cr_line, main = 'Earliest Credit Line', plotit = T)
+```
+Deliquency menunjukkan jumlah 30+ hari insiden tunggakan yang lewat jatuh tempo dalam file kredit Peminjam selama 2 tahun terakhir.
+```{r}
+clean$delinq_2yrs=as.numeric(clean$delinq_2yrs)
+Desc(clean$delinq_2yrs, main='Deliquency last 2 years', plotit = T)
+```
+Inquires menunjukkan jumlah pertanyaan dalam 6 bulan terakhir (tidak termasuk pertanyaan otomotif dan hipotek). Sebagian besar Peminjam belum melakukan inkuiri (52.5%) namun ada sebagian kecil yang telah melakukan inkuiri hingga 5 kali (0,5%)
+```{r}
+Desc(clean$inq_last_6mths, main = 'Inquires (Last 6 Months)', plotit = T)
+```
+Variabel open account jumlah jalur kredit terbuka dalam file kredit Peminjam. Kisarannya luas, dengan Peminjam tidak memiliki jalur kredit terbuka hingga beberapa memiliki sebanyak 61 jalur kredit terbuka.\
+```{r}
+Desc(clean$open_acc, main = 'Open Account', plotit = T)
+```
+Public Recotd adalah jumlah catatan penghinaan publik. Sebagian besar Peminjam tidak memilikinya (85,3%), namun ada pula yang memiliki 63 record.
+```{r}
+Desc(clean$pub_rec, main = 'Public Record', plotit = T)
+```
+Revolving credit balance memiliki distribusi dengan skewness yang tinggi. Beberapa Peminjam tidak memiliki kredit bergulir, beberapa memiliki lebih dari 2 juta. Saldo kredit bergulir Peminjam rata-rata adalah 16569.23.
+```{r}
+Desc(clean$revol_bal, main = 'Revolving Credit Balance', plotit = T)
+```
+Revolving credit utilization pada data memiliki skewness positif dengan beberapa outlier. Rata-rata yang dimiliki oleh nasabah adalah 56.89 dengan median 58. Sementara nilai terendahnya adalah nol, dan tertingginya adalah 892.3
+```{r}
+Desc(clean$revol_util, main = 'Revolving Credit Utilization', plotit = T)
+```
+Variabel total account adalah jumlah total credit line yang saat ini ada dalam file kredit peminjam. Distribusi skewness positif, dengan jumlah credit line mulai dari 2 hingga 156. Median Peminjam memiliki 24 credit line yang tercatat. Ingatlah bahwa Peminjam rata-rata memiliki 25.53 atau dapat diartikan sebanyak 26 credit line terbuka.
+```{r}
+Desc(clean$total_acc, main='Total Account', plotit = T)
+```
+Initial listing status menunjukkan status pencatatan awal pinjaman. Nilai yang mungkin adalah W, F. W singkatan dari whole, yaitu, tersedia bagi investor untuk dibeli secara keseluruhan (Peminjam mendapat manfaat dari mendapatkan 'pendanaan instan'). Lending Club memberikan subset pinjaman secara acak berdasarkan tingkatan yang tersedia untuk dibeli sebagai keseluruhan pinjaman untuk jangka waktu singkat (12 jam). Sisanya tersedia untuk pembelian fractional. 41.2% dari pinjaman adalah pinjaman utuh.
+```{r}
+Desc(clean$initial_list_status, main = 'Initial Listing Status', plotit = T)
+```
+Variabel outstanding principal adalah sisa pokok pinjaman untuk total jumlah yang didanai. Variabel ini harus sangat berkorelasi dengan jumlah Pinjaman karena pinjaman hanya dikeluarkan. Korelasi antara variabel ini dengan loan amount adalah 53.94%. Variabel ini akan lebih berguna ketika kita memiliki rangkaian data yang lebih panjang.
+```{r}
+Desc(clean$out_prncp, main = 'Outstanding Principal', plotit=T)
+cor(clean$out_prncp,clean$loan_amnt)
+```
+Total payment adalah pembayaran yang diterima hingga saat ini untuk jumlah total yang didanai. Banyak total payment bernilai 0 karena pinjaman baru dikeluarkan. Sekali lagi, variabel ini akan lebih berguna ketika kita memiliki deretan data yang lebih panjang. Pembayaran rata-rata hingga saat ini adalah 395790.
+```{r}
+Desc(clean$total_pymnt, main = 'Total Payment', plotit = T)
+```
+Total late fee menunjukkan banyaknya dana yang diterima ketika pembayaran terlambat. Pada dataset menunjukkan bahwa banyak sekali nasabah yang patuh untuk tidak terlambat dalam membayar pinjaman (98.1%)
+```{r}
+Desc(clean$total_rec_late_fee, main = 'Total Late Fee', plotit = T)
+```
+Last payment date menunjukkan pembayaran bulan terakhir telah diterima. Sebagian besar (44.6%) diterima pada Januari 2016.
+```{r}
+Desc(clean$last_pymnt_d, main='Last Payment Date', plotit = T)
+```
+Last payment amount adalah total pembayaran yang terakhir diterima dengan nilai tertingginya sebesar 36234.44 dan terendahnya adalah 0.
+```{r}
+Desc(clean$last_pymnt_amnt, main = 'Last Payment amount', plotit = T)
+```
+Last credit pulled adalah bulan terakhir Lending Club menarik kredit untuk pinjaman ini. Sebagian besar (76.6%) pinjaman diperbarui untuk Januari 2016.
+```{r}
+Desc(clean$last_credit_pull_d, main='Last Credit Pulled', plotit = T)
+```
+Kemudian dilakukan pengambilan data numerik untuk dianalisis lebih lanjut
+```{r}
+clean.f=clean
+clean.f$term=substr(clean.f$term,1,3) #get numeric data from loan term
+clean.f$term=as.numeric(clean.f$term)
+
+df=select_if(clean.f, is.numeric)
+df=subset(df, select = -policy_code)
+```
+Sebelum dilakukan pemrosesan, dilakukan normalisasi data terlebih dahulu sehingga didapatkan data yang tidak bias.
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x))) }
+df=as.data.frame(lapply(df, normalize))
+```
+Karena data tidak memiliki target, maka reduce feature dilakukan dengan melihat data yang tidak berkorelasi tinggi. 
+```{r}
+library(caret)
+cormat=cor(df)
+highlyCorrelated=findCorrelation(cormat, cutoff=0.90, verbose = FALSE)
+
+df.red=subset(df, select = -highlyCorrelated) #remove highly correlated variables
+str(df.red)
+```
+5. Data Modeling and Evaluation\
+Kemudian karena goals dari pemodelan ini adalah untuk mendapatkan prediksi bahwa pinjaman akan ditolak atau diterima dan data tidak memiliki target atau label, maka akan dilakukan klasifikasi menggunakan metode unsupervised learning kmeans dengan k=2 (1=diterima atau 2=ditolak). Nilai k=2 kurang optimal karena nilai between_SS/total_SS hanya 43.5%. Nilai ini dapat ditingkatkan dengan menambah nilai cluster. Jika dilakukan clustering dengan DBSCAN untuk mencari banyaknya cluster yang optimal, maka akan didapatkan nilai k=36. Namun hal ini tidak sesuai dengan tujuan dari klasifikasi. 
+```{r}
+library(dbscan)
+k2=kmeans(df.red,2, iter.max = 100)
+hullplot(df.red, k2$cluster)
+```
+\
+Dari hullplot diketahui bahwa terdapat dua kelompok data yang berbeda. Kemudian yang selanjutnya dilakukan adalah menggabungkan data label dengan dataset yang telah dilakukan preprocessing sehingga dapat diketahui prediksi yang didapatkan.
+
+6. Deployment\
+Selanjutnya data digabungkan dalam dataset. 
+```{r}
+rownames(clean)=1:nrow(clean)
+lab.k2=as.data.frame(k2$cluster)
+hasil=as.data.frame(c(clean,lab.k2))
+library(DT)
+datatable(hasil[1:20,c(1:10,50)])
+Desc(hasil$k2.cluster)
+Desc(hasil$grade~hasil$k2.cluster, digits=2, plotit=T)
+```
+Dari hasil klasifikasi, 71.7% pengajuan peminjaman diterima (1) dan mayotitas pinjaman diterima didapatkan oleh nasabah grade B dengan 25.81%
